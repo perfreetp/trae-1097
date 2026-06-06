@@ -202,8 +202,8 @@ export async function confirmPayment(req: Request, res: Response) {
   try {
     const { order_id, payment_method, paid_amount, transaction_id, coupon_id, visitor_discount_id } = req.body;
     
-    if (!order_id || paid_amount === undefined) {
-      return res.json(errorResponse(-1, '订单ID和支付金额不能为空'));
+    if (!order_id || paid_amount === undefined || paid_amount <= 0) {
+      return res.json(errorResponse(-1, '订单ID和有效的支付金额不能为空'));
     }
 
     const db = await getDatabase();
@@ -213,12 +213,40 @@ export async function confirmPayment(req: Request, res: Response) {
       return res.json(errorResponse(-1, '订单不存在'));
     }
 
+    const finalAmount = order.final_amount || 0;
+    const currentPaid = order.paid_amount || 0;
+
+    if (finalAmount <= 0) {
+      return res.json(errorResponse(-2, '订单应付金额为0，无需支付', { 
+        order_id,
+        final_amount: finalAmount
+      }));
+    }
+
+    if (currentPaid >= finalAmount) {
+      return res.json(errorResponse(-3, '订单已足额支付，无需重复支付', {
+        order_id,
+        final_amount: finalAmount,
+        paid_amount: currentPaid
+      }));
+    }
+
     const paymentTime = new Date().toISOString();
-    const newPaidAmount = Number((order.paid_amount + paid_amount).toFixed(2));
+    const newPaidAmount = Number((currentPaid + paid_amount).toFixed(2));
+    const remainingAmount = Number(Math.max(0, finalAmount - newPaidAmount).toFixed(2));
     
     let status = order.status;
-    if (newPaidAmount >= order.final_amount && order.status === 'parking') {
-      status = 'paid';
+    let isFullyPaid = false;
+    
+    if (newPaidAmount >= finalAmount) {
+      isFullyPaid = true;
+      if (order.status === 'parking' || order.status === 'unpaid') {
+        status = 'paid';
+      }
+    } else {
+      if (order.status === 'parking') {
+        status = 'unpaid';
+      }
     }
 
     await db.run(`
@@ -244,7 +272,12 @@ export async function confirmPayment(req: Request, res: Response) {
     }
 
     const updatedOrder = await db.get('SELECT * FROM parking_orders WHERE id = ?', [order_id]);
-    res.json(successResponse(updatedOrder, '支付确认成功'));
+    res.json(successResponse({
+      ...updatedOrder,
+      is_fully_paid: isFullyPaid,
+      remaining_amount: remainingAmount,
+      payment_note: isFullyPaid ? '已足额支付，可出场' : `部分支付，还需支付${remainingAmount}元`
+    }, '支付确认成功'));
   } catch (err: any) {
     res.json(errorResponse(-1, err.message));
   }

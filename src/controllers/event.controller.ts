@@ -148,6 +148,18 @@ export async function calculateExitFee(req: Request, res: Response) {
     }
 
     const finalAmount = Math.max(0, Number((originalAmount - discountAmount).toFixed(2)));
+    const couponAmount = order.coupon_amount || 0;
+    const actualFinalAmount = Math.max(0, Number((finalAmount - couponAmount).toFixed(2)));
+
+    await db.run(`
+      UPDATE parking_orders 
+      SET exit_time = ?, parking_duration = ?, original_amount = ?, 
+          discount_amount = ?, final_amount = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [exitTime.toISOString(), durationMinutes, originalAmount, 
+        Number(discountAmount.toFixed(2)), actualFinalAmount, order.id]);
+
+    const updatedOrder = await db.get('SELECT * FROM parking_orders WHERE id = ?', [order.id]);
 
     res.json(successResponse({
       order_id: order.id,
@@ -159,11 +171,15 @@ export async function calculateExitFee(req: Request, res: Response) {
       duration_text: formatDuration(durationMinutes),
       original_amount: originalAmount,
       discount_amount: Number(discountAmount.toFixed(2)),
-      final_amount: finalAmount,
+      coupon_amount: couponAmount,
+      final_amount: actualFinalAmount,
+      paid_amount: order.paid_amount || 0,
+      unpaid_amount: Number(Math.max(0, actualFinalAmount - (order.paid_amount || 0)).toFixed(2)),
       discount_type: discountType,
       monthly_card: monthlyCardInfo,
       visitor_discount: visitorDiscountInfo,
-      billing_rule: rule
+      billing_rule: rule,
+      order_status: updatedOrder.status
     }, '费用试算成功'));
   } catch (err: any) {
     res.json(errorResponse(-1, err.message));
@@ -192,20 +208,24 @@ export async function vehicleExit(req: Request, res: Response) {
       return res.json(errorResponse(-1, '订单不存在'));
     }
 
-    if (order.status !== 'parking') {
-      return res.json(errorResponse(-1, '订单状态不正确'));
+    if (order.status !== 'parking' && order.status !== 'unpaid' && order.status !== 'paid') {
+      return res.json(errorResponse(-1, '订单状态不正确', { current_status: order.status }));
     }
 
-    if (order.final_amount > 0 && order.paid_amount < order.final_amount) {
+    const finalAmount = order.final_amount || 0;
+    const paidAmount = order.paid_amount || 0;
+    
+    if (finalAmount > 0 && paidAmount < finalAmount) {
       return res.json(errorResponse(-5, '请先支付停车费', { 
         order_id: order.id,
-        final_amount: order.final_amount,
-        paid_amount: order.paid_amount
+        final_amount: finalAmount,
+        paid_amount: paidAmount,
+        unpaid_amount: Number((finalAmount - paidAmount).toFixed(2))
       }));
     }
 
     const exitTime = new Date().toISOString();
-    const durationMinutes = calculateParkingDuration(order.entry_time, exitTime);
+    const durationMinutes = order.parking_duration || calculateParkingDuration(order.entry_time, exitTime);
 
     await db.run(`
       UPDATE parking_orders 

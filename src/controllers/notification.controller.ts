@@ -214,39 +214,47 @@ export async function dailyStatistics(req: Request, res: Response) {
     
     const db = await getDatabase();
     
-    let where = 'WHERE DATE(entry_time) = ?';
-    const params: any[] = [targetDate];
+    let orderWhere = 'WHERE DATE(entry_time) = ?';
+    let eventWhere = 'WHERE DATE(event_time) = ?';
+    const orderParams: any[] = [targetDate];
+    const eventParams: any[] = [targetDate];
     
     if (lot_id) {
-      where += ' AND lot_id = ?';
-      params.push(lot_id);
+      orderWhere += ' AND lot_id = ?';
+      eventWhere += ' AND lot_id = ?';
+      orderParams.push(lot_id);
+      eventParams.push(lot_id);
     }
 
     const orders = await db.all(`
-      SELECT * FROM parking_orders ${where}
-    `, params);
+      SELECT * FROM parking_orders ${orderWhere}
+    `, orderParams);
 
     const entryEvents = await db.all(`
-      SELECT * FROM entry_exit_events ${where} AND event_type = 'entry'
-    `, params);
+      SELECT * FROM entry_exit_events ${eventWhere} AND event_type = 'entry'
+    `, eventParams);
 
     const exitEvents = await db.all(`
-      SELECT * FROM entry_exit_events ${where} AND event_type = 'exit'
-    `, params);
+      SELECT * FROM entry_exit_events ${eventWhere} AND event_type = 'exit'
+    `, eventParams);
 
     const parkingCount = orders.filter(o => o.status === 'parking').length;
     const completedCount = orders.filter(o => o.status === 'completed' || o.status === 'paid').length;
     const totalRevenue = orders.reduce((sum, o) => sum + (o.paid_amount || 0), 0);
 
+    const ordersWithDuration = orders.filter(o => o.parking_duration && (o.status === 'completed' || o.status === 'paid'));
+    const totalDuration = ordersWithDuration.reduce((sum, o) => sum + (o.parking_duration || 0), 0);
+
     res.json(successResponse({
       date: targetDate,
+      lot_id: lot_id || null,
       entry_count: entryEvents.length,
       exit_count: exitEvents.length,
       parking_count: parkingCount,
       completed_count: completedCount,
       total_revenue: Number(totalRevenue.toFixed(2)),
-      avg_parking_duration: completedCount > 0 
-        ? Math.round(orders.filter(o => o.parking_duration).reduce((sum, o) => sum + (o.parking_duration || 0), 0) / completedCount)
+      avg_parking_duration: ordersWithDuration.length > 0 
+        ? Math.round(totalDuration / ordersWithDuration.length)
         : 0
     }));
   } catch (err: any) {

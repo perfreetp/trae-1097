@@ -14,14 +14,14 @@ router.get('/health', (req, res) => {
 
 const parkingLotRouter = Router();
 parkingLotRouter.post('/', parkingLotCtrl.createParkingLot);
-parkingLotRouter.put('/:id', parkingLotCtrl.updateParkingLot);
-parkingLotRouter.get('/:id', parkingLotCtrl.getParkingLot);
 parkingLotRouter.get('/', parkingLotCtrl.listParkingLots);
-parkingLotRouter.delete('/:id', parkingLotCtrl.deleteParkingLot);
 parkingLotRouter.post('/zones', parkingLotCtrl.createZone);
+parkingLotRouter.get('/zones', parkingLotCtrl.listZones);
 parkingLotRouter.put('/zones/:id', parkingLotCtrl.updateZone);
-parkingLotRouter.get('/zones/list', parkingLotCtrl.listZones);
 parkingLotRouter.delete('/zones/:id', parkingLotCtrl.deleteZone);
+parkingLotRouter.get('/:id', parkingLotCtrl.getParkingLot);
+parkingLotRouter.put('/:id', parkingLotCtrl.updateParkingLot);
+parkingLotRouter.delete('/:id', parkingLotCtrl.deleteParkingLot);
 router.use('/parking-lots', parkingLotRouter);
 
 const spaceRouter = Router();
