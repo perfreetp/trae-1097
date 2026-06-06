@@ -214,21 +214,17 @@ export async function dailyStatistics(req: Request, res: Response) {
     
     const db = await getDatabase();
     
-    let orderWhere = 'WHERE DATE(entry_time) = ?';
+    const nextDate = new Date(targetDate);
+    nextDate.setDate(nextDate.getDate() + 1);
+    const nextDateStr = nextDate.toISOString().split('T')[0];
+    
     let eventWhere = 'WHERE DATE(event_time) = ?';
-    const orderParams: any[] = [targetDate];
     const eventParams: any[] = [targetDate];
     
     if (lot_id) {
-      orderWhere += ' AND lot_id = ?';
       eventWhere += ' AND lot_id = ?';
-      orderParams.push(lot_id);
       eventParams.push(lot_id);
     }
-
-    const orders = await db.all(`
-      SELECT * FROM parking_orders ${orderWhere}
-    `, orderParams);
 
     const entryEvents = await db.all(`
       SELECT * FROM entry_exit_events ${eventWhere} AND event_type = 'entry'
@@ -238,11 +234,54 @@ export async function dailyStatistics(req: Request, res: Response) {
       SELECT * FROM entry_exit_events ${eventWhere} AND event_type = 'exit'
     `, eventParams);
 
-    const parkingCount = orders.filter(o => o.status === 'parking').length;
-    const completedCount = orders.filter(o => o.status === 'completed' || o.status === 'paid').length;
-    const totalRevenue = orders.reduce((sum, o) => sum + (o.paid_amount || 0), 0);
+    let orderWhere = 'WHERE ';
+    const orderParams: any[] = [];
+    
+    if (lot_id) {
+      orderWhere += ' lot_id = ? AND ';
+      orderParams.push(lot_id);
+    }
+    
+    orderWhere += ` (
+      (payment_time >= ? AND payment_time < ?)
+      OR (exit_time >= ? AND exit_time < ?)
+    )`;
+    orderParams.push(targetDate, nextDateStr, targetDate, nextDateStr);
+    
+    const orders = await db.all(`
+      SELECT * FROM parking_orders ${orderWhere}
+    `, orderParams);
 
-    const ordersWithDuration = orders.filter(o => o.parking_duration && (o.status === 'completed' || o.status === 'paid'));
+    const completedOrders = orders.filter(o => 
+      o.status === 'completed' || o.status === 'paid'
+    );
+    
+    const totalRevenue = completedOrders.reduce((sum, o) => {
+      const payTime = o.payment_time;
+      if (payTime) {
+        const payDate = payTime.split('T')[0].replace(' ', 'T').split('T')[0];
+        if (payDate === targetDate) {
+          return sum + (o.paid_amount || 0);
+        }
+      }
+      const exitTime = o.exit_time;
+      if (exitTime) {
+        const exitDate = exitTime.split('T')[0].replace(' ', 'T').split('T')[0];
+        if (exitDate === targetDate) {
+          return sum + (o.paid_amount || 0);
+        }
+      }
+      return sum;
+    }, 0);
+
+    const parkingCountSql = lot_id 
+      ? 'SELECT COUNT(*) as cnt FROM parking_orders WHERE status = ? AND lot_id = ?'
+      : 'SELECT COUNT(*) as cnt FROM parking_orders WHERE status = ?';
+    const parkingParams = lot_id ? ['parking', lot_id] : ['parking'];
+    const parkingResult = await db.get(parkingCountSql, parkingParams);
+    const parkingCount = parkingResult?.cnt || 0;
+
+    const ordersWithDuration = completedOrders.filter(o => o.parking_duration);
     const totalDuration = ordersWithDuration.reduce((sum, o) => sum + (o.parking_duration || 0), 0);
 
     res.json(successResponse({
@@ -251,11 +290,12 @@ export async function dailyStatistics(req: Request, res: Response) {
       entry_count: entryEvents.length,
       exit_count: exitEvents.length,
       parking_count: parkingCount,
-      completed_count: completedCount,
+      completed_count: completedOrders.length,
       total_revenue: Number(totalRevenue.toFixed(2)),
       avg_parking_duration: ordersWithDuration.length > 0 
         ? Math.round(totalDuration / ordersWithDuration.length)
-        : 0
+        : 0,
+      note: '入场/出场按当天事件统计；完成订单和实收按当天支付或出场的订单统计（含跨天入场）'
     }));
   } catch (err: any) {
     res.json(errorResponse(-1, err.message));

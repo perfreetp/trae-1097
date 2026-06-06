@@ -16,7 +16,7 @@ const parkingLotRouter = Router();
 parkingLotRouter.post('/', parkingLotCtrl.createParkingLot);
 parkingLotRouter.get('/', parkingLotCtrl.listParkingLots);
 parkingLotRouter.post('/zones', parkingLotCtrl.createZone);
-parkingLotRouter.get('/zones', parkingLotCtrl.listZones);
+parkingLotRouter.get('/zones/list', parkingLotCtrl.listZones);
 parkingLotRouter.put('/zones/:id', parkingLotCtrl.updateZone);
 parkingLotRouter.delete('/zones/:id', parkingLotCtrl.deleteZone);
 parkingLotRouter.get('/:id', parkingLotCtrl.getParkingLot);

@@ -213,6 +213,15 @@ export async function vehicleExit(req: Request, res: Response) {
     }
 
     const finalAmount = order.final_amount || 0;
+    
+    if (finalAmount <= 0 && order.original_amount <= 0 && !order.parking_duration) {
+      return res.json(errorResponse(-6, '请先完成离场试算，获取应付金额后再出场', { 
+        order_id: order.id,
+        plate_number: order.plate_number,
+        hint: '请先调用 /api/v1/events/exit/calculate 接口'
+      }));
+    }
+
     const paidAmount = order.paid_amount || 0;
     
     if (finalAmount > 0 && paidAmount < finalAmount) {
